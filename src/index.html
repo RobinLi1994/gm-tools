@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>GM 工具箱 · 国密与证书工具</title>
+<style>
+:root{color-scheme:light;--ink:#183735;--muted:#687873;--teal:#176d5c;--line:#dce4de;--paper:#f5f7f3}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}button,a{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible{outline:3px solid #8ecbb8;outline-offset:3px}[hidden]{display:none!important}
+.shell{max-width:1220px;margin:auto;padding:0 32px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:76px;border-bottom:1px solid var(--line)}.brand{font-weight:700;font-size:19px;display:flex;gap:12px;align-items:center}.mark{display:grid;place-items:center;background:var(--teal);color:#fff;border-radius:9px;width:34px;height:36px;font:700 15px ui-monospace,monospace}.top-actions{display:flex;gap:16px;align-items:center}.top-actions a{color:var(--muted);font-size:12px;text-decoration:none}.reset{border:1px solid var(--line);background:#fff;color:var(--ink);padding:6px 12px;border-radius:7px;font-size:12px}.intro{padding:27px 0 20px}.eyebrow{font-size:11px;color:var(--teal);letter-spacing:2px;font-weight:700}h1{font-size:28px;margin:5px 0 7px;font-weight:650;letter-spacing:-.6px}.intro p{margin:0;color:var(--muted);font-size:13px}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:22px}.tab{background:none;border:0;border-bottom:3px solid transparent;padding:12px 22px;color:var(--muted);font-weight:600}.tab[aria-selected="true"]{color:var(--teal);border-bottom-color:var(--teal)}.tab small{font:11px ui-monospace,monospace;margin-right:8px;opacity:.65}.tool-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.tool-heading h2{margin:0;font-size:19px}.badge{font-size:11px;color:var(--teal);border:1px solid #cbdad0;border-radius:5px;padding:2px 8px;white-space:nowrap}.description{color:var(--muted);font-size:12px;margin:0 0 18px;max-width:950px}.notice{padding:10px 13px;background:#fff4df;border:1px solid #eddec2;border-radius:7px;color:#785e30;margin-bottom:16px;font-size:12px}iframe{display:block;width:100%;border:0;min-height:700px;background:transparent}.footer{border-top:1px solid var(--line);padding:16px 0 22px;font-size:11px;color:var(--muted);display:flex;gap:18px;justify-content:space-between}.status{color:var(--teal);font-size:12px;min-height:20px;margin:4px 0}.footer a{color:inherit}
+@media(max-width:600px){.shell{padding:0 16px}.topbar{min-height:68px}.top-actions{gap:10px}.top-actions .repo{display:none}.intro{padding-top:22px}h1{font-size:24px}.tabs{gap:0}.tab{flex:1;padding:11px 4px;font-size:12px}.tab small{display:none}.tool-heading h2{font-size:17px}.footer{flex-direction:column;gap:3px}.badge{font-size:10px}}
+</style>
+</head>
+<body><div class="shell">
+<header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">GM</span>GM 工具箱</div><div class="top-actions"><a class="repo" href="https://github.com/RobinLi1994/gm-tools" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a id="download-page" href="#" download="gm-tools.html">下载离线版 ↓</a><button class="reset" id="clear-all" type="button">清空所有工具</button></div></header>
+<section class="intro"><span class="eyebrow">CRYPTO & CERTIFICATE UTILITIES</span><h1>常用密码工具，一个入口。</h1><p>国密密钥转换、UKey 证书导入与 Jasypt 加解密。计算在浏览器内完成，输入不会发送到本站。</p></section>
+<nav class="tabs" role="tablist" aria-label="选择工具">
+<button class="tab" type="button" role="tab" id="tab-gm" aria-controls="panel-gm" aria-selected="true" data-tool="gm"><small>01</small>国密密钥转换</button>
+<button class="tab" type="button" role="tab" id="tab-ukey" aria-controls="panel-ukey" aria-selected="false" tabindex="-1" data-tool="ukey"><small>02</small>UKey 证书 SQL</button>
+<button class="tab" type="button" role="tab" id="tab-jasypt" aria-controls="panel-jasypt" aria-selected="false" tabindex="-1" data-tool="jasypt"><small>03</small>Jasypt 加解密</button>
+</nav>
+<main>
+<section role="tabpanel" id="panel-gm" aria-labelledby="tab-gm"><div class="tool-heading"><h2>国密密钥格式转换</h2><span class="badge">本地计算 · 无需联网</span></div><p class="description">使用签名证书保护加密私钥，输出 GM0016（小端序）或 GM0009。支持证书 PEM / DER，以及未加密的 PKCS#8 / SEC1 PEM 私钥。</p><div id="mount-gm"></div></section>
+<section role="tabpanel" id="panel-ukey" aria-labelledby="tab-ukey" hidden><div class="tool-heading"><h2>UKey 管理员证书 SQL</h2><span class="badge">需要本地 UKey 服务</span></div><p class="description">读取 UKey 签名证书，为现有 sms_admin / sms_admin_cert 表生成 PostgreSQL 导入脚本。本工具仅生成 SQL，执行前请确认目标库与角色 ID。</p><div class="notice">需要启动 wekey-skf 服务并插入 UKey。在线页面可能受到浏览器本地网络权限、跨域或混合内容限制；连接失败时，请下载离线版本地打开，并检查服务的 CORS 配置。手动粘贴证书仍需选择设备。</div><div id="mount-ukey"></div></section>
+<section role="tabpanel" id="panel-jasypt" aria-labelledby="tab-jasypt" hidden><div class="tool-heading"><h2>Jasypt 加密与解密</h2><span class="badge">本地计算 · 无需联网</span></div><p class="description">固定使用 PBEWithHMACSHA512AndAES_256 对应参数：PBKDF2-HMAC-SHA512、1000 次迭代、AES-256-CBC。支持手动处理和简单缩进结构 YAML 的 ENC(...) 批量解密。</p><div id="mount-jasypt"></div></section>
+</main><div id="app-status" class="status" role="status" aria-live="polite"></div>
+<footer class="footer"><span>切换工具保留当前输入；刷新、关闭或「清空所有工具」后清除应用状态。</span><span>不写入浏览器存储 · 无统计脚本 · <a href="https://github.com/RobinLi1994/gm-tools#readme" target="_blank" rel="noopener noreferrer">使用说明 ↗</a></span></footer>
+</div><noscript>请启用 JavaScript，工具运算在浏览器内完成。</noscript>
+<script id="tool-documents" type="application/json">__DOCUMENTS__</script>
+<script>__APP__</script></body></html>
