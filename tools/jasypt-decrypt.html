@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jasypt 解密工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 16px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    padding: 28px;
+    width: 100%;
+    max-width: 780px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 16px; margin-bottom: 12px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 16px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+  input[type=text], input[type=password], textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  input:focus, textarea:focus { outline: none; border-color: #4a7dff; box-shadow: 0 0 0 2px rgba(74,125,255,.15); }
+  textarea { resize: vertical; min-height: 80px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  button {
+    margin-top: 18px;
+    padding: 10px 22px;
+    border: none;
+    border-radius: 6px;
+    background: #4a7dff;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover { background: #3b6ae0; }
+  button.ghost { background: #f0f0f0; color: #333; }
+  button.ghost:hover { background: #e2e2e2; }
+  .result {
+    margin-top: 18px;
+    padding: 12px;
+    border-radius: 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 14px;
+    word-break: break-all;
+    display: none;
+  }
+  .result.ok { display: block; background: #f0f9eb; border: 1px solid #b7eb8f; color: #2c5e10; }
+  .result.err { display: block; background: #fff2f0; border: 1px solid #ffccc7; color: #a8071a; }
+  .pwd-toggle { font-size: 12px; color: #4a7dff; cursor: pointer; user-select: none; font-weight: 400; }
+
+  /* 拖放区 */
+  .dropzone {
+    border: 2px dashed #c9d4e8;
+    border-radius: 8px;
+    padding: 34px 16px;
+    text-align: center;
+    color: #667;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .15s;
+    background: #fafbff;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: #4a7dff; background: #f0f5ff; color: #4a7dff; }
+  .dropzone .hint { font-size: 12px; color: #99a; margin-top: 6px; }
+
+  /* 文件解析结果 */
+  .file-block { margin-top: 18px; border: 1px solid #e5e9f2; border-radius: 8px; overflow: hidden; }
+  .file-head {
+    background: #f6f8fc; padding: 10px 14px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .file-head .mk { font-weight: 400; color: #667; font-size: 12px; word-break: break-all; }
+  .file-head .mk code { background: #eef1f7; padding: 1px 6px; border-radius: 4px; }
+  .file-body { padding: 6px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid #f0f2f6; vertical-align: top; }
+  th { color: #889; font-weight: 600; font-size: 12px; }
+  td.path { font-family: "SF Mono", Menlo, Consolas, monospace; color: #556; word-break: break-all; }
+  td.plain {
+    font-family: "SF Mono", Menlo, Consolas, monospace; color: #2c5e10;
+    cursor: copy; word-break: break-all;
+  }
+  td.plain:hover { background: #f6fff0; }
+  td.plain.fail { color: #a8071a; cursor: default; }
+  td.plain.fail:hover { background: transparent; }
+  .empty-note { padding: 10px 14px; color: #a8071a; font-size: 13px; }
+  .warn-note { padding: 10px 14px; color: #ad6800; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Jasypt 解密工具</h1>
+  <div class="sub">算法 PBEWithHMACSHA512AndAES_256（jasypt-spring-boot 3.x 默认）。纯本地浏览器解密，文件与密钥不离开本机</div>
+
+  <h2>方式一：拖入 yaml 配置文件（自动提取密钥，解密全部 ENC）</h2>
+  <div class="dropzone" id="dropzone">
+    点击选择或拖拽 yaml 文件到这里（支持多文件）
+    <div class="hint">自动读取文件中的 jasypt.encryptor.password，解密文件内所有 ENC(...) 值</div>
+  </div>
+  <input type="file" id="fileInput" accept=".yaml,.yml,.properties,.txt" multiple style="display:none">
+  <div id="fileResults"></div>
+</div>
+
+<div class="card">
+  <h2>方式二：手动加密 / 解密</h2>
+
+  <label for="key">加密密钥（jasypt.encryptor.password）
+    <span class="pwd-toggle" id="togglePwd">显示</span>
+  </label>
+  <input type="password" id="key" placeholder="yaml 中 jasypt.encryptor.password 的值" autocomplete="off">
+
+  <label for="enc">密文（支持 ENC(...) 或纯 Base64）</label>
+  <textarea id="enc" placeholder="ENC(bnKwO/lNsQ5s8Gq11vkElHXwcWO5uT0rbS2N2IXsXH2f+...)"></textarea>
+
+  <div class="row">
+    <button id="btn">解密</button>
+    <button id="clear" class="ghost">清空</button>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <hr style="border:none; border-top:1px solid #eee; margin:24px 0 4px;">
+
+  <label for="plain">明文（加密生成 ENC(...)）</label>
+  <textarea id="plain" placeholder="要加密的明文，例如数据库密码"></textarea>
+
+  <div class="row">
+    <button id="btnEnc">加密</button>
+  </div>
+
+  <div class="result" id="encResult"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ============ 基础工具 ============
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToB64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+/** PBKDF2-HmacSHA512(1000) 派生 AES-256 密钥，加密解密共用 */
+async function deriveAesKey(password, salt, usages) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 1000, hash: 'SHA-512' },
+    keyMaterial,
+    { name: 'AES-CBC', length: 256 },
+    false, usages);
+}
+
+/**
+ * Jasypt 加密：随机 salt(16) + iv(16)，AES-CBC 加密后按 salt || iv || 密文 拼接
+ * 输出与 jasypt 1.9.3 默认格式一致的 ENC(...)
+ */
+async function encrypt(password, plainText) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(16));
+  const aesKey = await deriveAesKey(password, salt, ['encrypt']);
+  const cipherBytes = new Uint8Array(await crypto.subtle.encrypt(
+    { name: 'AES-CBC', iv }, aesKey, new TextEncoder().encode(plainText)));
+  const out = new Uint8Array(32 + cipherBytes.length);
+  out.set(salt, 0);
+  out.set(iv, 16);
+  out.set(cipherBytes, 32);
+  return 'ENC(' + bytesToB64(out) + ')';
+}
+
+/**
+ * Jasypt 解密：salt + iv + 密文 三段拼接，PBKDF2-HmacSHA512(1000) 派生 AES-256 密钥
+ * jasypt 1.9.3 默认 salt 16 字节，老版本 8 字节，两种都尝试
+ */
+async function decrypt(password, encText) {
+  let b64 = encText.trim();
+  const m = b64.match(/^ENC\((.*)\)$/s);
+  if (m) b64 = m[1].trim();
+
+  const data = b64ToBytes(b64);
+  if (data.length < 32) throw new Error('密文长度不足，格式不正确');
+
+  let lastErr = null;
+  for (const saltLen of [16, 8]) {
+    try {
+      const salt = data.slice(0, saltLen);
+      const iv = data.slice(saltLen, saltLen + 16);
+      const cipherBytes = data.slice(saltLen + 16);
+      const aesKey = await deriveAesKey(password, salt, ['decrypt']);
+      const plain = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, aesKey, cipherBytes);
+      return new TextDecoder().decode(plain);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
+// ============ yaml 解析 ============
+
+/** 去掉 yaml 值两端的引号 */
+function stripQuotes(v) {
+  v = v.trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/** 提取 jasypt.encryptor.password：只认 jasypt: 块内的 password，避免误取 datasource.password */
+function extractMasterKey(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*jasypt\s*:/.test(lines[i])) continue;
+    const baseIndent = lines[i].match(/^\s*/)[0].length;
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim() || line.trim().startsWith('#')) continue;
+      const indent = line.match(/^\s*/)[0].length;
+      if (indent <= baseIndent) break; // 已离开 jasypt 块
+      const m = line.match(/^\s*password\s*:\s*(.+?)\s*$/);
+      if (m) return stripQuotes(m[1]);
+    }
+  }
+  return null;
+}
+
+/** 根据缩进栈计算某一行配置项的完整路径，如 spring.datasource.password */
+function keyPathAt(lines, targetIdx) {
+  const stack = [];
+  for (let i = 0; i <= targetIdx; i++) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const m = line.match(/^(\s*)(['"]?)([\w.$-]+)\2\s*:/);
+    if (!m) continue;
+    const indent = m[1].length;
+    while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+    stack.push({ indent, key: m[3] });
+  }
+  return stack.map(s => s.key).join('.');
+}
+
+/** 解析 yaml 文本：返回 { masterKey, entries: [{path, line, enc}] } */
+function parseYaml(text) {
+  const lines = text.split(/\r?\n/);
+  const masterKey = extractMasterKey(lines);
+  const entries = [];
+  lines.forEach((line, idx) => {
+    if (!line.includes('ENC(')) return;
+    const m = line.match(/ENC\(([^)]*)\)/);
+    if (!m) return;
+    entries.push({ path: keyPathAt(lines, idx), line: idx + 1, enc: m[0] });
+  });
+  return { masterKey, entries };
+}
+
+// ============ yaml 文件结果渲染 ============
+
+async function renderFileResult(fileName, text) {
+  const { masterKey, entries } = parseYaml(text);
+  const block = document.createElement('div');
+  block.className = 'file-block';
+
+  const head = document.createElement('div');
+  head.className = 'file-head';
+  const nameEl = document.createElement('span');
+  nameEl.textContent = fileName;
+  head.appendChild(nameEl);
+  const mkEl = document.createElement('span');
+  mkEl.className = 'mk';
+  mkEl.innerHTML = masterKey
+    ? 'master key：<code></code>'
+    : 'master key：<code>未找到</code>';
+  if (masterKey) mkEl.querySelector('code').textContent = masterKey;
+  head.appendChild(mkEl);
+  block.appendChild(head);
+
+  if (!entries.length) {
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = '文件中没有发现 ENC(...) 密文';
+    block.appendChild(note);
+  } else if (!masterKey) {
+    const note = document.createElement('div');
+    note.className = 'warn-note';
+    note.textContent = `发现 ${entries.length} 个 ENC 密文，但未在文件中找到 jasypt.encryptor.password，无法自动解密`;
+    block.appendChild(note);
+  } else {
+    const body = document.createElement('div');
+    body.className = 'file-body';
+    const table = document.createElement('table');
+    table.innerHTML = '<tr><th>配置项</th><th>行号</th><th>明文（点击复制）</th></tr>';
+    for (const entry of entries) {
+      const tr = document.createElement('tr');
+      const tdPath = document.createElement('td');
+      tdPath.className = 'path';
+      tdPath.textContent = entry.path;
+      const tdLine = document.createElement('td');
+      tdLine.textContent = entry.line;
+      const tdPlain = document.createElement('td');
+      tdPlain.className = 'plain';
+      tdPlain.title = entry.enc;
+      try {
+        const plain = await decrypt(masterKey, entry.enc);
+        tdPlain.textContent = plain;
+        tdPlain.onclick = () => copyText(tdPlain, plain);
+      } catch (e) {
+        tdPlain.textContent = '解密失败';
+        tdPlain.classList.add('fail');
+      }
+      tr.append(tdPath, tdLine, tdPlain);
+      table.appendChild(tr);
+    }
+    body.appendChild(table);
+    block.appendChild(body);
+  }
+
+  $('fileResults').appendChild(block);
+
+  // 第一个带 master key 的文件顺手填充到手动模式的密钥框
+  if (masterKey && !$('key').value) $('key').value = masterKey;
+}
+
+function copyText(el, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const old = el.textContent;
+    el.textContent = text + '  ✓已复制';
+    setTimeout(() => { el.textContent = old; }, 1000);
+  });
+}
+
+async function handleFiles(files) {
+  for (const file of files) {
+    const text = await file.text();
+    await renderFileResult(file.name, text);
+  }
+}
+
+// ============ 事件绑定 ============
+
+const dz = $('dropzone');
+dz.onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => { handleFiles(e.target.files); e.target.value = ''; };
+dz.ondragover = e => { e.preventDefault(); dz.classList.add('dragover'); };
+dz.ondragleave = () => dz.classList.remove('dragover');
+dz.ondrop = e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+};
+
+$('togglePwd').onclick = () => {
+  const input = $('key');
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  $('togglePwd').textContent = show ? '隐藏' : '显示';
+};
+
+function showResult(text, ok) {
+  const el = $('result');
+  el.className = 'result ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+}
+
+$('btn').onclick = async () => {
+  try {
+    const password = $('key').value;
+    const enc = $('enc').value;
+    if (!password) return showResult('请输入加密密钥', false);
+    if (!enc) return showResult('请输入密文', false);
+    const text = await decrypt(password, enc);
+    showResult('明文：' + text, true);
+  } catch (e) {
+    showResult('解密失败：' + (e && e.message ? e.message : e) + '（请确认密钥和密文是否正确）', false);
+  }
+};
+
+$('clear').onclick = () => {
+  $('enc').value = '';
+  $('result').className = 'result';
+};
+
+$('btnEnc').onclick = async () => {
+  const el = $('encResult');
+  try {
+    const password = $('key').value;
+    const plain = $('plain').value;
+    if (!password) { el.className = 'result err'; el.textContent = '请输入加密密钥'; return; }
+    if (!plain) { el.className = 'result err'; el.textContent = '请输入要加密的明文'; return; }
+    const enc = await encrypt(password, plain);
+    el.className = 'result ok';
+    el.textContent = enc + '（点击复制）';
+    el.style.cursor = 'copy';
+    el.onclick = () => copyText(el, enc);
+  } catch (e) {
+    el.className = 'result err';
+    el.textContent = '加密失败：' + (e && e.message ? e.message : e);
+  }
+};
+
+$('enc').addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $('btn').click();
+});
+</script>
+</body>
+</html>
