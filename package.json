@@ -1,0 +1,11 @@
+{
+  "name": "gm-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix tools/gm-key-converter run build && node build.mjs",
+    "test": "npm --prefix tools/gm-key-converter test",
+    "check": "node --check src/app.js && node --check build.mjs"
+  }
+}
