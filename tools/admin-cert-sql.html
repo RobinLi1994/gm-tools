@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UKey 管理员证书导入 SQL 生成工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f0f2f5; color: #303133; padding: 24px;
+  }
+  .container { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #909399; font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: #fff; border-radius: 8px; padding: 20px 24px;
+    margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .card-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #409eff; color: #fff; font-size: 13px; flex-shrink: 0;
+  }
+  .form-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .form-row:last-child { margin-bottom: 0; }
+  label { font-size: 13px; color: #606266; white-space: nowrap; }
+  input[type="text"], input[type="number"], textarea {
+    border: 1px solid #dcdfe6; border-radius: 4px; padding: 7px 10px;
+    font-size: 13px; font-family: inherit; outline: none; transition: border-color .2s;
+  }
+  input[type="text"]:focus, input[type="number"]:focus, textarea:focus { border-color: #409eff; }
+  input[readonly] { background: #f5f7fa; color: #909399; }
+  .btn {
+    border: none; border-radius: 4px; padding: 8px 16px; font-size: 13px;
+    cursor: pointer; transition: opacity .2s; white-space: nowrap;
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: #409eff; color: #fff; }
+  .btn-success { background: #67c23a; color: #fff; }
+  .btn-plain { background: #ecf5ff; color: #409eff; border: 1px solid #b3d8ff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  th, td { border: 1px solid #ebeef5; padding: 8px 10px; text-align: left; }
+  th { background: #f5f7fa; color: #606266; font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f5f7fa; }
+  tbody tr.selected { background: #ecf5ff; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+  .cert-grid { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; font-size: 13px; }
+  .cert-grid .k { color: #909399; }
+  .cert-grid .v { word-break: break-all; }
+  #msgBox {
+    display: none; border-radius: 4px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px;
+  }
+  #msgBox.error { display: block; background: #fef0f0; color: #f56c6c; border: 1px solid #fde2e2; }
+  #msgBox.success { display: block; background: #f0f9eb; color: #67c23a; border: 1px solid #e1f3d8; }
+  #msgBox.info { display: block; background: #ecf5ff; color: #409eff; border: 1px solid #d9ecff; }
+  .divider { border-top: 1px dashed #e4e7ed; margin: 16px 0; }
+  #sqlOutput {
+    width: 100%; min-height: 340px; resize: vertical;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6;
+    background: #282c34; color: #abb2bf; border: none; border-radius: 6px; padding: 14px;
+  }
+  .hint { font-size: 12px; color: #909399; margin-top: 8px; line-height: 1.6; }
+  details { margin-top: 14px; }
+  summary { font-size: 13px; color: #409eff; cursor: pointer; user-select: none; }
+  #pemInput { width: 100%; min-height: 120px; margin-top: 10px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>UKey 管理员证书导入 SQL 生成工具</h1>
+  <div class="subtitle">从 wekey-skf 枚举 UKey 并导出签名证书，生成 sms_admin / sms_admin_cert 的 PostgreSQL 导入 SQL（按 u_key_sn 存在则更新）</div>
+
+  <div id="msgBox"></div>
+
+  <!-- 第 1 步：连接服务并枚举设备 -->
+  <div class="card">
+    <div class="card-title"><span class="step-num">1</span>连接 wekey-skf 并枚举设备</div>
+    <div class="form-row">
+      <label for="apiBase">服务地址</label>
+      <input type="text" id="apiBase" value="http://localhost:9001" style="width:260px">
+      <button class="btn btn-primary" id="btnEnum" onclick="enumDevices()">枚举设备</button>
+      <span class="hint" id="enumHint"></span>
+    </div>
+    <table id="devTable" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:40px">选择</th><th>设备名称</th><th>序列号</th>
+          <th>厂商</th><th>标签</th><th>固件版本</th><th>已登录</th>
+        </tr>
+      </thead>
+      <tbody id="devTbody"></tbody>
+    </table>
+  </div>
+
+  <!-- 第 2 步：获取证书 -->
+  <div class="card">
+    <div class="card-title"><span class="step-num">2</span>获取管理员签名证书</div>
+    <div class="form-row">
+      <button class="btn btn-primary" id="btnExport" disabled onclick="exportCert()">导出选中设备证书</button>
+      <span class="hint">取容器中 certType=0 的签名证书；UKey 未导入证书时请使用下方手动粘贴</span>
+    </div>
+    <details>
+      <summary>手动粘贴 PEM 证书（兜底）</summary>
+      <textarea id="pemInput" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+      <div class="form-row" style="margin-top:10px">
+        <button class="btn btn-plain" onclick="loadPemManual()">解析并载入</button>
+      </div>
+    </details>
+    <div class="divider"></div>
+    <div id="certInfo" style="display:none">
+      <div class="cert-grid">
+        <div class="k">主题 DN</div><div class="v" id="ciSubject"></div>
+        <div class="k">通用名 CN</div><div class="v" id="ciCn"></div>
+        <div class="k">证书序列号</div><div class="v mono" id="ciSn"></div>
+        <div class="k">有效期</div><div class="v mono" id="ciValidity"></div>
+        <div class="k">密钥类型</div><div class="v" id="ciKpt"></div>
+        <div class="k">SHA-256 指纹</div><div class="v mono" id="ciFp"></div>
+      </div>
+    </div>
+    <div id="certEmpty" class="hint">尚未载入证书</div>
+  </div>
+
+  <!-- 第 3 步：管理员信息 -->
+  <div class="card">
+    <div class="card-title"><span class="step-num">3</span>填写管理员信息</div>
+    <div class="form-row">
+      <label for="adminName">管理员名称</label>
+      <input type="text" id="adminName" style="width:240px" placeholder="默认取证书 CN">
+      <label for="roleId">角色 ID</label>
+      <input type="number" id="roleId" value="1001" min="1" style="width:110px">
+    </div>
+    <div class="form-row">
+      <label for="kptInput">密钥类型</label>
+      <input type="text" id="kptInput" style="width:200px" placeholder="载入证书后自动填充">
+      <label>类型</label>
+      <input type="text" value="1（WEB）" readonly style="width:90px">
+    </div>
+    <div class="hint">role_id 需与目标库 sms_role 表中的 id 对应；管理员启用状态默认写入「启用」，授权有效期取证书到期时间。</div>
+  </div>
+
+  <!-- 第 4 步：生成 SQL -->
+  <div class="card">
+    <div class="card-title"><span class="step-num">4</span>生成导入 SQL（PostgreSQL）</div>
+    <div class="form-row">
+      <button class="btn btn-success" onclick="generateSql()">生成 SQL</button>
+      <button class="btn btn-plain" id="btnCopy" disabled onclick="copySql()">复制</button>
+      <button class="btn btn-plain" id="btnDownload" disabled onclick="downloadSql()">下载 .sql</button>
+    </div>
+    <textarea id="sqlOutput" readonly placeholder="生成的 SQL 将显示在这里"></textarea>
+    <div class="hint">
+      逻辑：按 u_key_sn 判断，sms_admin 存在则更新、不存在则插入；证书按 sn 同理；最后关联 sign_cert_id 并推进序列。<br>
+      请在目标库执行前确认 BEGIN/COMMIT 事务完整提交。
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= 全局状态 ================= */
+const state = {
+  revision: 0,     // 切换输入时使旧设备请求失效
+  devices: [],      // 枚举到的设备列表
+  selected: null,   // 选中的设备对象
+  certB64: null,    // 当前载入证书的规范 Base64(DER)（无空白字符）
+  certInfo: null,   // 解析出的证书信息 {sn, subject, cn, notBefore, notAfter, keyPairType, fingerprint}
+};
+
+// 设备、证书或表单变化后，禁止继续复制不再匹配当前输入的旧 SQL。
+function clearSql() {
+  document.getElementById('sqlOutput').value = '';
+  document.getElementById('btnCopy').disabled = true;
+  document.getElementById('btnDownload').disabled = true;
+}
+function clearCertificate() {
+  state.revision++;
+  document.getElementById('btnEnum').disabled = false;
+  state.certB64 = null;
+  state.certInfo = null;
+  clearSql();
+  document.getElementById('certInfo').style.display = 'none';
+  document.getElementById('certEmpty').style.display = '';
+  for (const id of ['ciSubject', 'ciCn', 'ciSn', 'ciValidity', 'ciKpt', 'ciFp']) document.getElementById(id).textContent = '';
+  for (const id of ['pemInput', 'adminName', 'kptInput']) document.getElementById(id).value = '';
+  document.getElementById('btnExport').disabled = !state.selected;
+}
+for (const id of ['adminName', 'roleId', 'kptInput']) document.getElementById(id).addEventListener('input', clearSql);
+document.getElementById('apiBase').addEventListener('input', () => {
+  state.selected = null;
+  state.devices = [];
+  clearCertificate();
+  renderDevices();
+  document.getElementById('btnEnum').disabled = false;
+});
+
+/* ================= 消息提示 ================= */
+function showMsg(type, text) {
+  const box = document.getElementById('msgBox');
+  box.className = type;
+  box.textContent = text;
+}
+function clearMsg() { document.getElementById('msgBox').className = ''; }
+
+/* ================= wekey-skf API 调用 ================= */
+// 统一处理响应信封：code=0 成功，否则抛出中文错误
+async function callApi(path, options) {
+  const base = document.getElementById('apiBase').value.replace(/\/+$/, '');
+  let resp;
+  try {
+    resp = await fetch(base + path, options);
+  } catch (e) {
+    throw new Error('无法连接 wekey-skf 服务（' + base + '），请确认程序已启动且端口正确');
+  }
+  const body = await resp.json();
+  if (body.code !== 0) {
+    throw new Error(body.message || ('接口返回错误码 ' + body.code));
+  }
+  return body.data;
+}
+
+/* ================= 第 1 步：枚举设备 ================= */
+async function enumDevices() {
+  clearMsg();
+  const btn = document.getElementById('btnEnum');
+  state.selected = null;
+  state.devices = [];
+  clearCertificate();
+  renderDevices();
+  const revision = state.revision;
+  btn.disabled = true;
+  try {
+    const devices = await callApi('/api/v1/enum-dev');
+    if (revision !== state.revision) return;
+    state.devices = devices || [];
+    state.selected = null;
+    renderDevices();
+    if (state.devices.length === 0) {
+      showMsg('info', '未检测到 UKey 设备，请插入后重新枚举');
+    } else {
+      showMsg('success', '检测到 ' + state.devices.length + ' 个设备，请点击表格行选择');
+    }
+  } catch (e) {
+    if (revision === state.revision) showMsg('error', e.message);
+  } finally {
+    if (revision === state.revision) btn.disabled = false;
+  }
+}
+
+function renderDevices() {
+  const tbody = document.getElementById('devTbody');
+  tbody.innerHTML = '';
+  state.devices.forEach((dev, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="radio" name="dev"></td>' +
+      '<td>' + escHtml(dev.deviceName) + '</td>' +
+      '<td class="mono">' + escHtml(dev.serialNumber) + '</td>' +
+      '<td>' + escHtml(dev.manufacturer) + '</td>' +
+      '<td>' + escHtml(dev.label || '') + '</td>' +
+      '<td>' + escHtml(dev.firmwareVersion || '') + '</td>' +
+      '<td>' + (dev.isLogin ? '是' : '否') + '</td>';
+    tr.onclick = () => {
+      state.selected = dev;
+      clearCertificate();
+      document.querySelectorAll('#devTbody tr').forEach(r => r.classList.remove('selected'));
+      tr.classList.add('selected');
+      tr.querySelector('input[type=radio]').checked = true;
+      document.getElementById('btnExport').disabled = false;
+    };
+    tbody.appendChild(tr);
+  });
+  document.getElementById('devTable').style.display = state.devices.length ? '' : 'none';
+  document.getElementById('btnExport').disabled = true;
+}
+
+/* ================= 第 2 步：导出 / 粘贴证书 ================= */
+async function exportCert() {
+  clearMsg();
+  if (!state.selected) { showMsg('error', '请先选择设备'); return; }
+  clearCertificate();
+  const revision = state.revision;
+  const btn = document.getElementById('btnExport');
+  btn.disabled = true;
+  try {
+    const certs = await callApi('/api/v1/export-cert?serialNumber=' + encodeURIComponent(state.selected.serialNumber));
+    if (revision !== state.revision) return;
+    if (!certs || certs.length === 0) {
+      throw new Error('设备容器中没有证书，请先在 wekey-skf 中申请并导入证书');
+    }
+    // 顺序固定为签名证书在前，仍按 certType=0 显式查找兜底
+    const sigCert = certs.find(c => c.certType === 0) || certs[0];
+    loadCertFromBase64(sigCert.cert);
+    showMsg('success', '签名证书导出成功');
+  } catch (e) {
+    if (revision === state.revision) showMsg('error', e.message);
+  } finally {
+    if (revision === state.revision) btn.disabled = !state.selected;
+  }
+}
+
+function loadPemManual() {
+  clearMsg();
+  const pem = document.getElementById('pemInput').value.trim();
+  clearCertificate();
+  document.getElementById('pemInput').value = pem;
+  if (!pem) { showMsg('error', '请粘贴 PEM 格式证书'); return; }
+  try {
+    // 去掉 PEM 头尾与所有空白字符，得到纯 Base64(DER)
+    const b64 = pem.replace(/-----BEGIN [^-]+-----/g, '').replace(/-----END [^-]+-----/g, '').replace(/\s+/g, '');
+    if (!b64) throw new Error('PEM 内容为空');
+    loadCertFromBase64(b64);
+    showMsg('success', 'PEM 证书解析成功');
+  } catch (e) {
+    showMsg('error', '证书解析失败：' + e.message);
+  }
+}
+
+// 统一的证书载入入口：解析 DER、计算指纹、回填页面
+// 兼容 PEM（含 -----BEGIN----- 头尾）与纯 Base64(DER) 两种输入
+function loadCertFromBase64(certText) {
+  const b64 = String(certText)
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s+/g, '');
+  const der = base64ToBytes(b64);
+  const info = parseCertDer(der);
+  info.fingerprint = sha256Hex(der);
+  // 规范化为标准 Base64（重新编码，消除输入差异）
+  state.certB64 = bytesToBase64(der);
+  state.certInfo = info;
+
+  document.getElementById('ciSubject').textContent = info.subject;
+  document.getElementById('ciCn').textContent = info.cn || '-';
+  document.getElementById('ciSn').textContent = info.sn;
+  document.getElementById('ciValidity').textContent = info.notBefore + ' ~ ' + info.notAfter;
+  document.getElementById('ciKpt').textContent = info.keyPairType || '未识别，请手动填写';
+  document.getElementById('ciFp').textContent = info.fingerprint;
+  document.getElementById('certInfo').style.display = '';
+  document.getElementById('certEmpty').style.display = 'none';
+
+  // 自动填充表单（用户可再修改）
+  if (info.cn && !document.getElementById('adminName').value) {
+    document.getElementById('adminName').value = info.cn;
+  }
+  if (info.keyPairType) {
+    document.getElementById('kptInput').value = info.keyPairType;
+  }
+}
+
+/* ================= 第 4 步：生成 SQL ================= */
+function generateSql() {
+  clearMsg();
+  // 1. 前置校验
+  if (!state.selected) { showMsg('error', '请先枚举并选择 UKey 设备'); return; }
+  if (!state.certInfo) { showMsg('error', '请先导出或粘贴管理员证书'); return; }
+  const adminName = document.getElementById('adminName').value.trim();
+  const roleId = parseInt(document.getElementById('roleId').value, 10);
+  const kpt = document.getElementById('kptInput').value.trim();
+  if (!adminName) { showMsg('error', '请填写管理员名称'); return; }
+  if (!roleId || roleId < 1) { showMsg('error', '请填写有效的角色 ID'); return; }
+  if (!kpt) { showMsg('error', '请填写密钥类型（key_pair_type）'); return; }
+
+  const dev = state.selected;
+  const cert = state.certInfo;
+  const pem = derToPem(state.certB64);
+
+  // 2. 组装 SQL（字符串字面量单引号双写转义；时间戳直接用 'yyyy-MM-dd HH:mm:ss'）
+  const q = s => String(s == null ? '' : s).replace(/'/g, "''");
+  const comment = s => String(s ?? '').replace(/[\r\n]+/g, ' ');
+  const uSn = q(dev.serialNumber), uName = q(dev.deviceName), uLabel = q(dev.label || ''), uMfr = q(dev.manufacturer);
+  const cName = q(adminName), cKpt = q(kpt);
+  const certSn = q(cert.sn), certSubject = q(cert.subject), fp = cert.fingerprint;
+  const nb = cert.notBefore, na = cert.notAfter;
+  const now = new Date();
+  const genTime = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()) +
+    ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+
+  const sql =
+`-- ============================================================
+-- 管理员证书导入 SQL（UKey 管理员）
+-- 管理员名称: ${comment(adminName)}
+-- UKey 序列号: ${comment(dev.serialNumber)}
+-- 证书序列号: ${comment(cert.sn)}
+-- 生成时间: ${genTime}
+-- 逻辑: 按 u_key_sn 判断 sms_admin 存在则更新、不存在则插入；
+--       证书按 sn 同理；执行后可重复运行（幂等）。
+-- ============================================================
+
+BEGIN;
+
+-- 1. 管理员：u_key_sn 已存在则更新（同时复活软删除记录）
+UPDATE sms_admin SET
+    name              = '${cName}',
+    role_id           = ${roleId},
+    key_pair_type     = '${cKpt}',
+    u_key_label       = '${uLabel}',
+    u_key_name        = '${uName}',
+    u_key_manufacturer = '${uMfr}',
+    in_date           = '${na}',
+    enabled           = true,
+    deleted           = false,
+    update_at         = CURRENT_TIMESTAMP
+WHERE u_key_sn = '${uSn}';
+
+-- 2. 管理员：不存在则插入（id 取当前最大值 + 1）
+INSERT INTO sms_admin (id, create_at, deleted, update_at, version, enabled, in_date,
+                       name, role_id, u_key_label, u_key_manufacturer, u_key_name, u_key_sn,
+                       key_pair_type, type)
+SELECT (SELECT COALESCE(MAX(id), 0) + 1 FROM sms_admin),
+       CURRENT_TIMESTAMP, false, CURRENT_TIMESTAMP, 0, true, '${na}',
+       '${cName}', ${roleId}, '${uLabel}', '${uMfr}', '${uName}', '${uSn}',
+       '${cKpt}', 1
+WHERE NOT EXISTS (SELECT 1 FROM sms_admin WHERE u_key_sn = '${uSn}');
+
+-- 3. 证书：sn 已存在则更新
+UPDATE sms_admin_cert SET
+    admin_id    = (SELECT id FROM sms_admin WHERE u_key_sn = '${uSn}'),
+    cert        = '${pem}',
+    name        = '${certSubject}',
+    not_after   = '${na}',
+    not_before  = '${nb}',
+    status      = 0,
+    fingerprint = '${fp}',
+    update_at   = CURRENT_TIMESTAMP
+WHERE sn = '${certSn}';
+
+-- 4. 证书：不存在则插入
+INSERT INTO sms_admin_cert (id, create_at, deleted, update_at, version, admin_id,
+                            cert, name, not_after, not_before, revoke_date, sn, status, fingerprint)
+SELECT (SELECT COALESCE(MAX(id), 0) + 1 FROM sms_admin_cert),
+       CURRENT_TIMESTAMP, false, CURRENT_TIMESTAMP, 0,
+       (SELECT id FROM sms_admin WHERE u_key_sn = '${uSn}'),
+       '${pem}', '${certSubject}', '${na}', '${nb}', NULL, '${certSn}', 0, '${fp}'
+WHERE NOT EXISTS (SELECT 1 FROM sms_admin_cert WHERE sn = '${certSn}');
+
+-- 5. 关联管理员当前签名证书
+UPDATE sms_admin
+SET sign_cert_id = (SELECT id FROM sms_admin_cert WHERE sn = '${certSn}')
+WHERE u_key_sn = '${uSn}';
+
+COMMIT;
+
+-- 6. 推进序列，避免后续通过系统新增数据时主键冲突
+SELECT setval('sms_admin_id_seq', (SELECT MAX(id) FROM sms_admin));
+SELECT setval('sms_admin_cert_id_seq', (SELECT MAX(id) FROM sms_admin_cert));
+`;
+
+  document.getElementById('sqlOutput').value = sql;
+  document.getElementById('btnCopy').disabled = false;
+  document.getElementById('btnDownload').disabled = false;
+  showMsg('success', 'SQL 生成成功，请检查后到目标数据库执行');
+}
+
+function copySql() {
+  const ta = document.getElementById('sqlOutput');
+  // file:// 场景下 navigator.clipboard 可能不可用，优先尝试，失败回退 execCommand
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value)
+      .then(() => showMsg('success', '已复制到剪贴板'))
+      .catch(() => fallbackCopy(ta));
+  } else {
+    fallbackCopy(ta);
+  }
+}
+function fallbackCopy(ta) {
+  ta.removeAttribute('readonly');
+  ta.select();
+  document.execCommand('copy');
+  ta.setAttribute('readonly', '');
+  showMsg('success', '已复制到剪贴板');
+}
+
+function downloadSql() {
+  const blob = new Blob([document.getElementById('sqlOutput').value], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sms_admin_' + (state.selected ? state.selected.serialNumber : 'cert') + '.sql';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ================= Base64 / PEM 工具 ================= */
+function base64ToBytes(b64) {
+  const clean = b64.replace(/\s+/g, '');
+  let bin;
+  try {
+    bin = atob(clean);
+  } catch (e) {
+    throw new Error('Base64 解码失败，证书内容不合法');
+  }
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+// DER(Base64) 转 PEM：64 字符折行加头尾，与后端存储格式一致
+function derToPem(b64) {
+  const lines = [];
+  for (let i = 0; i < b64.length; i += 64) lines.push(b64.slice(i, i + 64));
+  return '-----BEGIN CERTIFICATE-----\n' + lines.join('\n') + '\n-----END CERTIFICATE-----';
+}
+
+/* ================= 极简 ASN.1(DER) 解析器 ================= */
+// 只解析提取管理员证书所需字段：序列号、有效期、主题/签发者 DN、SPKI 密钥算法
+
+// 读取一个 TLV 节点，返回标签与各段位置
+function derRead(buf, pos) {
+  if (pos >= buf.length) throw new Error('DER 数据越界');
+  const tag = buf[pos++];
+  let len = buf[pos++];
+  if (len & 0x80) {
+    const n = len & 0x7f;
+    if (n === 0 || n > 4) throw new Error('不支持的长度编码');
+    len = 0;
+    for (let i = 0; i < n; i++) len = (len << 8) | buf[pos++];
+  }
+  return { tag: tag, valStart: pos, valEnd: pos + len, end: pos + len };
+}
+
+function decodeOid(bytes) {
+  if (bytes.length === 0) throw new Error('OID 为空');
+  // 第一字节 = 一级*40 + 二级
+  let oid = Math.floor(bytes[0] / 40) + '.' + (bytes[0] % 40);
+  let val = 0;
+  for (let i = 1; i < bytes.length; i++) {
+    val = val * 128 + (bytes[i] & 0x7f);
+    if (!(bytes[i] & 0x80)) { oid += '.' + val; val = 0; }
+  }
+  return oid;
+}
+
+// 目录字符串解码：UTF8 / Printable / IA5 / Teletex / BMP / Universal
+function decodeDerString(tag, bytes) {
+  if (tag === 0x1e) { // BMPString: UTF-16BE
+    let s = '';
+    for (let i = 0; i + 1 < bytes.length; i += 2) s += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+    return s;
+  }
+  if (tag === 0x1c) { // UniversalString: UTF-32BE
+    let s = '';
+    for (let i = 0; i + 3 < bytes.length; i += 4) {
+      s += String.fromCodePoint((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]);
+    }
+    return s;
+  }
+  if (tag === 0x14) { // TeletexString 按 latin1 处理
+    return Array.from(bytes).map(b => String.fromCharCode(b)).join('');
+  }
+  // 0x0C UTF8String、0x13 PrintableString、0x16 IA5String 等统一按 UTF-8 解码
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+// 常见 DN 属性 OID → 短名
+const DN_OIDS = {
+  '2.5.4.3': 'CN', '2.5.4.10': 'O', '2.5.4.11': 'OU', '2.5.4.6': 'C',
+  '2.5.4.7': 'L', '2.5.4.8': 'ST', '2.5.4.9': 'STREET', '2.5.4.5': 'SERIALNUMBER',
+  '2.5.4.12': 'T', '2.5.4.42': 'GN', '2.5.4.4': 'SN', '2.5.4.43': 'I',
+  '2.5.4.46': 'dnQualifier', '1.2.840.113549.1.9.1': 'EMAILADDRESS'
+};
+
+// 解析 Name(SEQ OF RDN) 为 RDN 数组（保持证书内原始顺序）
+function parseName(buf, nameNode) {
+  const rdns = [];
+  let p = nameNode.valStart;
+  while (p < nameNode.valEnd) {
+    const setNode = derRead(buf, p);
+    const parts = [];
+    let q = setNode.valStart;
+    while (q < setNode.valEnd) {
+      const atv = derRead(buf, q); // SEQUENCE { OID, value }
+      const oidNode = derRead(buf, atv.valStart);
+      const valNode = derRead(buf, oidNode.end);
+      const oid = decodeOid(buf.slice(oidNode.valStart, oidNode.valEnd));
+      const value = decodeDerString(valNode.tag, buf.slice(valNode.valStart, valNode.valEnd));
+      parts.push({ key: DN_OIDS[oid] || oid, value: value });
+      q = atv.end;
+    }
+    rdns.push(parts);
+    p = setNode.end;
+  }
+  return rdns;
+}
+
+// RFC2253 转义（与 Java X500Principal.toString() 风格一致）
+function escapeDnValue(v) {
+  let s = v.replace(/([,+"\\<>;])/g, '\\$1');
+  if (s.charAt(0) === ' ' || s.charAt(0) === '#') s = '\\' + s;
+  if (s.charAt(s.length - 1) === ' ') s = s.slice(0, -1) + '\\ ';
+  return s;
+}
+
+// RDN 数组 → "CN=张三,O=xxx,OU=yyy" 字符串（反转顺序，CN 在前）
+function rdnsToString(rdns) {
+  return rdns.slice().reverse()
+    .map(parts => parts.map(p => p.key + '=' + escapeDnValue(p.value)).join('+'))
+    .join(',');
+}
+
+// 解析 UTCTime / GeneralizedTime → 'yyyy-MM-dd HH:mm:ss'
+function parseDerTime(tag, bytes) {
+  const s = new TextDecoder('utf-8').decode(bytes);
+  let year, rest;
+  if (tag === 0x17) { // UTCTime: YYMMDDhhmmssZ，50 起算
+    const yy = parseInt(s.slice(0, 2), 10);
+    year = (yy >= 50 ? 1900 + yy : 2000 + yy).toString();
+    rest = s.slice(2);
+  } else { // GeneralizedTime: YYYYMMDDhhmmssZ
+    year = s.slice(0, 4);
+    rest = s.slice(4);
+  }
+  return year + '-' + rest.slice(0, 2) + '-' + rest.slice(2, 4) +
+    ' ' + rest.slice(4, 6) + ':' + rest.slice(6, 8) + ':' + rest.slice(8, 10);
+}
+
+function bytesToHexUpper(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+// 解析证书 DER，提取 SQL 所需全部字段
+function parseCertDer(der) {
+  // Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue }
+  const certNode = derRead(der, 0);
+  if (certNode.tag !== 0x30) throw new Error('不是有效的 X.509 证书');
+  const tbs = derRead(der, certNode.valStart);
+
+  let p = tbs.valStart;
+  let node = derRead(der, p);
+  // 跳过版本号 [0] EXPLICIT
+  if (node.tag === 0xa0) { p = node.end; node = derRead(der, p); }
+
+  // 1. 序列号 INTEGER：直接取 DER 内容字节转大写 hex，
+  //    与 Java BigInteger.toByteArray() → Hex 的行为一致（含可能的前导 00）
+  if (node.tag !== 0x02) throw new Error('证书序列号解析失败');
+  const sn = bytesToHexUpper(der.slice(node.valStart, node.valEnd));
+  p = node.end;
+
+  // 2. 签名算法（跳过）
+  node = derRead(der, p); p = node.end;
+
+  // 3. 签发者 DN（跳过，仅校验结构）
+  node = derRead(der, p); p = node.end;
+
+  // 4. 有效期 SEQUENCE { notBefore, notAfter }
+  node = derRead(der, p);
+  const nbNode = derRead(der, node.valStart);
+  const naNode = derRead(der, nbNode.end);
+  const notBefore = parseDerTime(nbNode.tag, der.slice(nbNode.valStart, nbNode.valEnd));
+  const notAfter = parseDerTime(naNode.tag, der.slice(naNode.valStart, naNode.valEnd));
+  p = node.end;
+
+  // 5. 主题 DN
+  node = derRead(der, p);
+  const rdns = parseName(der, node);
+  const subject = rdnsToString(rdns);
+  let cn = '';
+  for (const parts of rdns) {
+    const found = parts.find(x => x.key === 'CN');
+    if (found) { cn = found.value; break; }
+  }
+  p = node.end;
+
+  // 6. SPKI → key_pair_type
+  node = derRead(der, p);
+  const keyPairType = parseKeyPairType(der, node);
+
+  return { sn: sn, subject: subject, cn: cn, notBefore: notBefore, notAfter: notAfter, keyPairType: keyPairType };
+}
+
+// 从 SPKI 解析密钥类型，与后端 KeyTools.getKeyPairType 生成规则对齐
+function parseKeyPairType(der, spkiNode) {
+  const algSeq = derRead(der, spkiNode.valStart); // AlgorithmIdentifier
+  const oidNode = derRead(der, algSeq.valStart);
+  const algOid = decodeOid(der.slice(oidNode.valStart, oidNode.valEnd));
+
+  // RSA：OID 1.2.840.113549.1.1.1，取模数位数
+  if (algOid === '1.2.840.113549.1.1.1') {
+    const bitString = derRead(der, algSeq.end);
+    // BIT STRING 第 1 字节为未使用位数，其后是 RSAPublicKey SEQUENCE
+    const rsaSeq = derRead(der, bitString.valStart + 1);
+    const modNode = derRead(der, rsaSeq.valStart);
+    let mod = der.slice(modNode.valStart, modNode.valEnd);
+    // 去掉补码前导 0，剩余字节数 × 8 即模数位数
+    let i = 0;
+    while (i < mod.length - 1 && mod[i] === 0) i++;
+    return 'RSA_' + ((mod.length - i) * 8);
+  }
+
+  // SM2 曲线 OID 直接作为算法 OID 的兼容处理
+  if (algOid === '1.2.156.10197.1.301') return 'SM2_sm2p256v1';
+
+  // EC/SM2：id-ecPublicKey + 曲线参数 OID
+  if (algOid === '1.2.840.10045.2.1') {
+    const paramsNode = derRead(der, oidNode.end);
+    const curveOid = decodeOid(der.slice(paramsNode.valStart, paramsNode.valEnd));
+    switch (curveOid) {
+      case '1.2.156.10197.1.301': return 'SM2_sm2p256v1';
+      case '1.2.840.10045.3.1.7': return 'EC_P-256';
+      case '1.3.132.0.34': return 'EC_P-384';
+      case '1.3.132.0.35': return 'EC_P-521';
+      default: return '';
+    }
+  }
+  return '';
+}
+
+/* ================= SHA-256（纯 JS 实现，兼容 file:// 环境） ================= */
+function rotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+function sha256Hex(bytes) {
+  const K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a,
+      h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+
+  // 消息填充：尾部加 0x80，补 0 至 56 (mod 64)，最后 8 字节大端位长度
+  const arr = Array.from(bytes);
+  const bitLen = bytes.length * 8;
+  arr.push(0x80);
+  while (arr.length % 64 !== 56) arr.push(0);
+  for (let i = 7; i >= 0; i--) arr.push(Math.floor(bitLen / Math.pow(256, i)) % 256);
+
+  const w = new Array(64);
+  for (let block = 0; block < arr.length; block += 64) {
+    for (let t = 0; t < 16; t++) {
+      const o = block + t * 4;
+      w[t] = ((arr[o] << 24) | (arr[o + 1] << 16) | (arr[o + 2] << 8) | arr[o + 3]) >>> 0;
+    }
+    for (let t = 16; t < 64; t++) {
+      const s0 = (rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3)) >>> 0;
+      const s1 = (rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10)) >>> 0;
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let t = 0; t < 64; t++) {
+      const s1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+      const ch = ((e & f) ^ (~e & g)) >>> 0;
+      const t1 = (h + s1 + ch + K[t] + w[t]) >>> 0;
+      const s0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      const t2 = (s0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+  }
+  return [h0, h1, h2, h3, h4, h5, h6, h7].map(x => x.toString(16).padStart(8, '0')).join('');
+}
+
+/* ================= 其他工具 ================= */
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+</script>
+</body>
+</html>
