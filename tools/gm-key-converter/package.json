@@ -9,6 +9,8 @@
     "test": "node --test tests/core.test.mjs"
   },
   "dependencies": {
+    "@noble/curves": "1.9.7",
+    "crypto-js": "4.2.0",
     "sm-crypto-v2": "1.15.1"
   },
   "devDependencies": {
