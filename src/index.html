@@ -20,7 +20,7 @@
 <button class="tab" type="button" role="tab" id="tab-jasypt" aria-controls="panel-jasypt" aria-selected="false" tabindex="-1" data-tool="jasypt"><small>03</small>Jasypt 加解密</button>
 </nav>
 <main>
-<section role="tabpanel" id="panel-gm" aria-labelledby="tab-gm"><div class="tool-heading"><h2>国密密钥格式转换</h2><span class="badge">本地计算 · 无需联网</span></div><p class="description">使用签名证书保护加密私钥，输出 GM0016（小端序）或 GM0009。支持证书 PEM / DER，以及未加密的 PKCS#8 / SEC1 PEM 私钥。</p><div id="mount-gm"></div></section>
+<section role="tabpanel" id="panel-gm" aria-labelledby="tab-gm"><div class="tool-heading"><h2>国密密钥格式转换</h2><span class="badge">本地计算 · 无需联网</span></div><p class="description">使用签名证书保护加密私钥。SM2 支持 GM0016 / GM0009，RSA 支持 GM0016 项目兼容格式（小端序）。支持证书 PEM / DER，以及未加密的 PKCS#8 / SEC1 / PKCS#1 PEM 私钥。</p><div id="mount-gm"></div></section>
 <section role="tabpanel" id="panel-ukey" aria-labelledby="tab-ukey" hidden><div class="tool-heading"><h2>UKey 管理员证书 SQL</h2><span class="badge">需要本地 UKey 服务</span></div><p class="description">读取 UKey 签名证书，为现有 sms_admin / sms_admin_cert 表生成 PostgreSQL 导入脚本。本工具仅生成 SQL，执行前请确认目标库与角色 ID。</p><div class="notice">需要启动 wekey-skf 服务并插入 UKey。在线页面可能受到浏览器本地网络权限、跨域或混合内容限制；连接失败时，请下载离线版本地打开，并检查服务的 CORS 配置。手动粘贴证书仍需选择设备。</div><div id="mount-ukey"></div></section>
 <section role="tabpanel" id="panel-jasypt" aria-labelledby="tab-jasypt" hidden><div class="tool-heading"><h2>Jasypt 加密与解密</h2><span class="badge">本地计算 · 无需联网</span></div><p class="description">固定使用 PBEWithHMACSHA512AndAES_256 对应参数：PBKDF2-HMAC-SHA512、1000 次迭代、AES-256-CBC。支持手动处理和简单缩进结构 YAML 的 ENC(...) 批量解密。</p><div id="mount-jasypt"></div></section>
 </main><div id="app-status" class="status" role="status" aria-live="polite"></div>
