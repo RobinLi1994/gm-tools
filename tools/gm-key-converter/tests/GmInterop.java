@@ -15,6 +15,9 @@ import java.util.Base64;
 import java.util.Date;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.spec.IvParameterSpec;
+import java.security.Signature;
+import java.security.interfaces.RSAPublicKey;
 import org.bouncycastle.asn1.*;
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -42,7 +45,7 @@ class GmInterop {
     /**
      * 执行测试材料生成或两种格式的交叉解密验证，不读取用户真实密钥。
      *
-     * @param args 操作名（generate 或 verify）及临时测试目录
+     * @param args 操作名（generate、verify 或 verify-rsa）及临时测试目录
      * @throws Exception 测试材料生成失败、格式不符或解密结果不一致时抛出
      */
     public static void main(String[] args) throws Exception {
@@ -53,11 +56,23 @@ class GmInterop {
             createFixture(directory, "sign", "sm2p256v1");
             createFixture(directory, "enc", "sm2p256v1");
             createFixture(directory, "p256", "secp256r1");
+            createRsaFixture(directory, "rsa-sign", 2048);
+            for (int bits : new int[]{2048, 3072, 4096}) {
+                createRsaFixture(directory, "rsa-enc-" + bits, bits);
+            }
             System.out.println("临时测试证书及密钥已生成");
         } else if ("verify".equals(args[0])) {
             verify(directory, "0016");
             verify(directory, "0009");
             System.out.println("GM0016 和 GM0009 交叉解密验证通过");
+        } else if ("verify-rsa".equals(args[0])) {
+            for (int bits : new int[]{2048, 3072, 4096}) {
+                for (String encoding : new String[]{"key", "pkcs1.key"}) {
+                    verifyRsa(directory, "rsa-output-" + bits + "-" + encoding, "rsa-sign", "rsa-enc-" + bits);
+                }
+            }
+            verifyRsa(directory, "rsa-output-large-sign", "rsa-enc-4096", "rsa-enc-2048");
+            System.out.println("RSA GM0016 交叉解密验证通过");
         } else {
             throw new IllegalArgumentException("未知测试操作");
         }
@@ -87,6 +102,32 @@ class GmInterop {
         Files.write(directory.resolve(name + "-pkcs8.der"), pair.getPrivate().getEncoded());
         byte[] sec1 = PrivateKeyInfo.getInstance(pair.getPrivate().getEncoded()).parsePrivateKey().toASN1Primitive().getEncoded();
         writePem(directory.resolve(name + "-sec1.key"), "EC PRIVATE KEY", sec1);
+    }
+
+    /**
+     * 生成 RSA 自签名证书及两种未加密私钥编码，供解析与独立解封测试使用。
+     *
+     * @param directory 合成测试材料目录
+     * @param name      文件名前缀
+     * @param bits      RSA 模数位数
+     * @throws Exception 密钥生成、证书签名或文件写入失败时抛出
+     */
+    private static void createRsaFixture(Path directory, String name, int bits) throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA", "BC");
+        generator.initialize(bits);
+        KeyPair pair = generator.generateKeyPair();
+        X500Name subject = new X500Name("CN=RSA offline test " + name);
+        Instant now = Instant.now();
+        X509CertificateHolder certificate = new JcaX509v3CertificateBuilder(subject, BigInteger.ONE,
+                Date.from(now.minusSeconds(60)), Date.from(now.plusSeconds(86400)), subject, pair.getPublic())
+                .build(new JcaContentSignerBuilder("SHA256withRSA").setProvider("BC").build(pair.getPrivate()));
+        Files.write(directory.resolve(name + ".der"), certificate.getEncoded());
+        writePem(directory.resolve(name + ".pem"), "CERTIFICATE", certificate.getEncoded());
+        byte[] pkcs8 = pair.getPrivate().getEncoded();
+        writePem(directory.resolve(name + ".key"), "PRIVATE KEY", pkcs8);
+        Files.write(directory.resolve(name + "-pkcs8.der"), pkcs8);
+        byte[] pkcs1 = PrivateKeyInfo.getInstance(pkcs8).parsePrivateKey().toASN1Primitive().getEncoded();
+        writePem(directory.resolve(name + "-pkcs1.key"), "RSA PRIVATE KEY", pkcs1);
     }
 
     /**
@@ -156,6 +197,53 @@ class GmInterop {
         Cipher cipher = Cipher.getInstance("SM4/ECB/NoPadding", "BC");
         cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(sessionKey, "SM4"));
         check(Arrays.equals(cipher.doFinal(encryptedPrivate), BigIntegers.asUnsignedByteArray(32, expectedKey.getS())), "私钥解密不一致");
+    }
+
+    /**
+     * 按现有项目兼容协议解封 RSA Blob，并以证书验签证明恢复出的私钥可用。
+     *
+     * @param directory 测试材料目录
+     * @param output    待解封 Base64 文件名
+     * @param signer    签名密钥材料名前缀
+     * @param recipient 加密密钥材料名前缀
+     * @throws Exception 结构、算法、填充、解封内容或签名验证不符合预期时抛出
+     */
+    private static void verifyRsa(Path directory, String output, String signer, String recipient) throws Exception {
+        byte[] encoded = Base64.getDecoder().decode(Files.readString(directory.resolve(output)).trim());
+        ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+        JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider("BC");
+        var signKey = converter.getPrivateKey(PrivateKeyInfo.getInstance(Files.readAllBytes(directory.resolve(signer + "-pkcs8.der"))));
+        var signPublic = (RSAPublicKey) converter.getPublicKey(new X509CertificateHolder(
+                Files.readAllBytes(directory.resolve(signer + ".der"))).getSubjectPublicKeyInfo());
+        check(buffer.getInt() == 0x2002, "RSA 对称算法标识错误");
+        int wrappedLength = buffer.getInt();
+        check(wrappedLength == (signPublic.getModulus().bitLength() + 7) / 8, "RSA 会话密钥密文长度错误");
+        byte[] wrapped = new byte[wrappedLength];
+        buffer.get(wrapped);
+        byte[] encrypted = new byte[buffer.remaining()];
+        buffer.get(encrypted);
+        Cipher rsa = Cipher.getInstance("RSA/ECB/PKCS1Padding", "BC");
+        rsa.init(Cipher.DECRYPT_MODE, signKey);
+        byte[] session = rsa.doFinal(wrapped);
+        check(session.length == 16, "RSA 会话密钥应为 16 字节");
+        byte[] expanded = Arrays.copyOf(session, 24);
+        System.arraycopy(session, 0, expanded, 16, 8);
+        Cipher des = Cipher.getInstance("DESede/CBC/PKCS5Padding", "BC");
+        des.init(Cipher.DECRYPT_MODE, new SecretKeySpec(expanded, "DESede"),
+                new IvParameterSpec(new byte[]{0, 1, 2, 3, 4, 5, 6, 7}));
+        byte[] decrypted = des.doFinal(encrypted);
+        check(Arrays.equals(decrypted, Files.readAllBytes(directory.resolve(recipient + "-pkcs8.der"))), "RSA 私钥解封不一致");
+        var recovered = converter.getPrivateKey(PrivateKeyInfo.getInstance(decrypted));
+        var publicKey = converter.getPublicKey(new X509CertificateHolder(
+                Files.readAllBytes(directory.resolve(recipient + ".der"))).getSubjectPublicKeyInfo());
+        Signature signature = Signature.getInstance("SHA256withRSA", "BC");
+        byte[] challenge = new byte[]{10, 11, 12, 13};
+        signature.initSign(recovered);
+        signature.update(challenge);
+        byte[] signed = signature.sign();
+        signature.initVerify(publicKey);
+        signature.update(challenge);
+        check(signature.verify(signed), "恢复的 RSA 私钥不能通过证书公钥验签");
     }
 
     /**
