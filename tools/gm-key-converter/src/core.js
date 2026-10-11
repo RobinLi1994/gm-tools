@@ -1,6 +1,8 @@
 import { sm2, sm4 } from 'sm-crypto-v2';
+import { wrapRsaPrivateKey } from './rsa.js';
 
 export const MAX_INPUT_BYTES = 256 * 1024;
+const RSA_OID = '2a864886f70d010101';
 const EC_OID = '2a8648ce3d0201';
 const SM2_OID = '2a811ccf5501822d';
 const SM4_ECB_OID = '2a811ccf55016801';
@@ -76,6 +78,51 @@ function checkCurve(algorithm) {
     && hex(tagged(fields[1], 6).value) === SM2_OID, '仅支持命名曲线为 SM2（sm2p256v1）的证书或私钥。');
 }
 
+/** 只接受通用 rsaEncryption；受限 RSA-PSS 公钥不能用于加密会话密钥。 */
+function isRsaAlgorithm(node) {
+  const fields = tagged(node, 0x30).children;
+  if (hex(tagged(fields[0], 6).value) !== RSA_OID) return false;
+  requireValue(fields.length === 1 || (fields.length === 2 && fields[1].tag === 5 && fields[1].value.length === 0), 'RSA 算法参数必须为空或 NULL。');
+  return true;
+}
+
+/** 限制 RSA 整数的编码和大小，防止损坏输入或超长整数阻塞页面。 */
+function rsaInteger(node) {
+  const bytes = tagged(node, 2, 'RSA 参数必须为 INTEGER。').value;
+  requireValue(bytes.length > 0 && bytes.length <= 513 && !(bytes[0] & 128)
+    && !(bytes.length > 1 && bytes[0] === 0 && !(bytes[1] & 128)), 'RSA 整数不是规范的非负 DER 编码。');
+  const value = BigInt('0x' + hex(bytes));
+  requireValue(value > 0n, 'RSA 密钥参数必须大于零。');
+  return value;
+}
+
+function rsaPublicParameters(fields) {
+  const n = rsaInteger(fields[0]);
+  const e = rsaInteger(fields[1]);
+  const bits = n.toString(2).length;
+  requireValue([2048, 3072, 4096].includes(bits) && n % 2n === 1n, '仅支持 RSA 2048、3072、4096 位奇数模数。');
+  requireValue(e >= 3n && e <= 0xffffffffn && e % 2n === 1n, 'RSA 公钥指数必须是 3 至 2^32−1 的奇数。');
+  return { algorithm: 'RSA', n, e, bits };
+}
+
+/** 两素数 RSA 私钥须满足模数、指数和 CRT 关系，不能仅凭公钥部分判定匹配。 */
+function rsaPrivateKey(node) {
+  const fields = tagged(node, 0x30).children;
+  requireValue(fields.length === 9 && hex(tagged(fields[0], 2).value) === '00', '仅支持版本 0 的两素数 PKCS#1 RSA 私钥。');
+  const pub = rsaPublicParameters(fields.slice(1, 3));
+  const [d, p, q, dp, dq, qi] = fields.slice(3).map(rsaInteger);
+  requireValue(p > 2n && q > 2n && p !== q && p % 2n === 1n && q % 2n === 1n
+    && p * q === pub.n && d < pub.n, 'RSA 私钥的模数与素数参数不一致。');
+  requireValue(pub.e * d % (p - 1n) === 1n && pub.e * d % (q - 1n) === 1n
+    && dp === d % (p - 1n) && dq === d % (q - 1n) && qi < p && qi * q % p === 1n,
+  'RSA 私钥指数或 CRT 参数不一致。');
+  // 统一包装成无属性的 PKCS#8，兼容现有 Java PrivateKey.getEncoded()。
+  const pkcs1 = der(0x30, concat(...fields.map(field => der(field.tag, field.value))));
+  const pkcs8 = der(0x30, concat(der(2, Uint8Array.of(0)),
+    der(0x30, concat(der(6, unhex(RSA_OID)), der(5, new Uint8Array()))), der(4, pkcs1)));
+  return { ...pub, pkcs8 };
+}
+
 function publicKeyFromBits(node) {
   const bits = tagged(node, 3, '公钥 BIT STRING 结构无效。').value;
   requireValue(bits[0] === 0 && (bits.length === 66 || bits.length === 34), 'SM2 公钥长度或填充位无效。');
@@ -124,7 +171,7 @@ function checkCertificateStructure(certificate) {
   return body[offset + 5];
 }
 
-/** 读取一张 PEM/DER 证书中的 SM2 公钥；此步骤不验证信任链或证书用途。 */
+/** 读取一张 PEM/DER 证书中的 SM2 或 RSA 公钥；此步骤不验证信任链或证书用途。 */
 export function parseCertificate(input) {
   requireValue(input && input.length > 0, '请提供证书文件或 PEM 文本。');
   let bytes;
@@ -138,18 +185,27 @@ export function parseCertificate(input) {
   const certificate = tagged(parseDer(bytes), 0x30, '证书 DER 结构无效。');
   const spki = tagged(checkCertificateStructure(certificate), 0x30, '证书缺少公钥信息。').children;
   requireValue(spki.length === 2, '证书公钥结构无效。');
+  if (isRsaAlgorithm(spki[0])) {
+    const bits = tagged(spki[1], 3).value;
+    requireValue(bits.length > 1 && bits[0] === 0, 'RSA 公钥 BIT STRING 结构无效。');
+    const fields = tagged(parseDer(bits.subarray(1)), 0x30).children;
+    requireValue(fields.length === 2, 'RSA 公钥字段数错误。');
+    return rsaPublicParameters(fields);
+  }
   checkCurve(spki[0]);
-  return { publicKey: publicKeyFromBits(spki[1]) };
+  return { algorithm: 'SM2', publicKey: publicKeyFromBits(spki[1]) };
 }
 
-/** 解析未加密的 PKCS#8 / SEC1 PEM，并检查曲线、标量和可选公钥的一致性。 */
+/** 解析未加密的 PKCS#8 / SEC1 / PKCS#1 PEM，并检查曲线、标量和可选公钥的一致性。 */
 export function parsePrivateKey(input) {
-  const { label, bytes } = decodePem(input, ['PRIVATE KEY', 'EC PRIVATE KEY']);
+  const { label, bytes } = decodePem(input, ['PRIVATE KEY', 'EC PRIVATE KEY', 'RSA PRIVATE KEY']);
   let node = tagged(parseDer(bytes), 0x30);
+  if (label === 'RSA PRIVATE KEY') return rsaPrivateKey(node);
   let inheritedCurve = false;
   if (label === 'PRIVATE KEY') {
     const fields = node.children;
     requireValue(fields.length >= 3 && fields.length <= 4 && hex(tagged(fields[0], 2).value) === '00', 'PKCS#8 私钥版本或字段无效。');
+    if (isRsaAlgorithm(fields[1])) return rsaPrivateKey(parseDer(tagged(fields[2], 4).value));
     checkCurve(fields[1]);
     inheritedCurve = true;
     node = tagged(parseDer(tagged(fields[2], 4).value), 0x30);
@@ -205,6 +261,17 @@ export function convert({ signCert, encCert, privateKey, format }) {
   try { signing = parseCertificate(signCert); } catch (error) { throw new Error('签名证书：' + error.message); }
   try { encryption = parseCertificate(encCert); } catch (error) { throw new Error('加密证书：' + error.message); }
   try { scalar = parsePrivateKey(privateKey); } catch (error) { throw new Error('加密私钥：' + error.message); }
+  const privateAlgorithm = typeof scalar === 'string' ? 'SM2' : scalar.algorithm;
+  requireValue(signing.algorithm === encryption.algorithm && encryption.algorithm === privateAlgorithm,
+    '签名证书、加密证书和私钥的算法必须一致，不能混用 RSA 与 SM2。');
+  if (encryption.algorithm === 'RSA') {
+    try {
+      requireValue(format === '0016', 'GM0009 仅支持 SM2；RSA 请选择 GM0016 RSA 兼容格式。');
+      requireValue(scalar.n === encryption.n && scalar.e === encryption.e, '加密私钥与加密证书不匹配，请检查是否选择了同一组文件。');
+      const output = wrapRsaPrivateKey(signing, scalar.pkcs8);
+      return { base64: btoa(String.fromCharCode(...output)), byteLength: output.length, format, algorithm: 'RSA' };
+    } finally { scalar.pkcs8.fill(0); }
+  }
   requireValue(sm2.getPublicKeyFromPrivateKey(scalar).toLowerCase() === encryption.publicKey, '加密私钥与加密证书不匹配，请检查是否选择了同一组文件。');
   const session = crypto.getRandomValues(new Uint8Array(16));
   const privateBytes = unhex(scalar);
@@ -237,7 +304,7 @@ export function convert({ signCert, encCert, privateKey, format }) {
       output = der(0x30, concat(der(0x30, der(6, unhex(SM4_ECB_OID))), encryptedKey,
         der(3, concat(Uint8Array.of(0), publicBytes)), der(3, concat(Uint8Array.of(0), encryptedPrivate))));
     }
-    return { base64: btoa(String.fromCharCode(...output)), byteLength: output.length, format };
+    return { base64: btoa(String.fromCharCode(...output)), byteLength: output.length, format, algorithm: 'SM2' };
   } finally {
     session.fill(0);
     privateBytes.fill(0);
