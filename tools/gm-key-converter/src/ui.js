@@ -36,6 +36,7 @@ function markField(field, name) {
   element.textContent = name;
   element.classList.toggle('ready', !!byId(field + '-text').value.trim());
   document.querySelector(`[data-field="${field}"]`).classList.remove('has-error');
+  syncFormat();
 }
 
 /** DER 文件转成 PEM 展示，让文件选择与粘贴始终使用同一份可见输入。 */
@@ -111,14 +112,35 @@ for (const field of fields) {
 document.addEventListener('dragover', (event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); });
 document.addEventListener('drop', (event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); });
 
-for (const radio of document.querySelectorAll('input[name="format"]')) {
-  radio.addEventListener('change', () => {
-    resetResult();
-    const is0016 = selectedFormat() === '0016';
-    byId('result-format').textContent = 'GM' + selectedFormat();
-    byId('format-description').textContent = is0016 ? '智能密码钥匙密钥保护结构' : 'SM2 加密密钥对保护结构';
-    byId('format-tag').textContent = is0016 ? '小端序 / LE' : 'ASN.1 / DER';
+/** 根据有效输入识别 RSA；输入未完整时仅调整格式选项，错误由转换校验统一报告。 */
+function hasRsaInput() {
+  return fields.some(field => {
+    try {
+      const input = byId(field + '-text').value.trim();
+      if (!input) return false;
+      const parsed = field === 'key' ? parsePrivateKey(input) : parseCertificate(input);
+      const rsa = parsed.algorithm === 'RSA';
+      if (rsa && field === 'key') parsed.pkcs8.fill(0);
+      return rsa;
+    } catch { return false; }
   });
+}
+
+function syncFormat() {
+  const rsa = hasRsaInput();
+  const gm0009 = document.querySelector('input[value="0009"]');
+  gm0009.disabled = rsa;
+  if (rsa && gm0009.checked) document.querySelector('input[value="0016"]').checked = true;
+  const is0016 = selectedFormat() === '0016';
+  byId('result-format').textContent = rsa ? 'GM0016 RSA · 项目兼容' : 'GM' + selectedFormat();
+  byId('format-description').textContent = rsa ? 'GM0016 RSA · 现有项目兼容格式'
+    : is0016 ? '智能密码钥匙密钥保护结构' : 'SM2 加密密钥对保护结构';
+  byId('format-tag').textContent = is0016 ? '小端序 / LE' : 'ASN.1 / DER';
+  byId('rsa-note').hidden = !rsa;
+}
+
+for (const radio of document.querySelectorAll('input[name="format"]')) {
+  radio.addEventListener('change', () => { resetResult(); syncFormat(); });
 }
 
 byId('convert').addEventListener('click', async () => {
@@ -146,7 +168,7 @@ byId('convert').addEventListener('click', async () => {
     byId('result-status').textContent = '已生成';
     byId('result-status').classList.add('success');
     byId('result-size').textContent = `${result.byteLength} 字节 / ${result.base64.length} 字符`;
-    message(`GM${result.format} 已生成，加密证书与私钥匹配。`);
+    message(`${result.algorithm === 'RSA' ? 'GM0016 RSA 兼容格式' : 'GM' + result.format} 已生成，加密证书与私钥匹配。`);
   } catch (error) {
     result = null;
     byId('result-status').textContent = '转换失败';
@@ -179,7 +201,7 @@ byId('download').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([result.base64], { type: 'text/plain;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = `GM${result.format}_enveloped_key.key`;
+  link.download = result.algorithm === 'RSA' ? 'GM0016_RSA_enveloped_key.key' : `GM${result.format}_enveloped_key.key`;
   document.body.append(link);
   link.click();
   link.remove();
