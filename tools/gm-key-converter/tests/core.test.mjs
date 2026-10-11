@@ -78,3 +78,66 @@ test('拒绝含有效公钥但缺少 X.509 必需字段的伪证书', () => {
   const invalidCertificate = seq(body, seq(), tlv(3, Buffer.from([0])));
   assert.throws(() => parseCertificate(invalidCertificate), /证书/);
 });
+
+
+test('RSA 证书 PEM/DER 与 PKCS#1/PKCS#8 私钥识别并归一化', () => {
+  for (const bits of [2048, 3072, 4096]) {
+    const name = `rsa-enc-${bits}`;
+    const cert = parseCertificate(text(name + '.pem'));
+    assert.equal(cert.algorithm, 'RSA');
+    assert.equal(cert.bits, bits);
+    assert.deepEqual(cert, parseCertificate(read(name + '.der')));
+    const key = parsePrivateKey(text(name + '.key'));
+    const pkcs1 = parsePrivateKey(text(name + '-pkcs1.key'));
+    assert.equal(key.algorithm, 'RSA');
+    assert.equal(key.n, cert.n);
+    assert.equal(key.e, cert.e);
+    assert.deepEqual(key.pkcs8, pkcs1.pkcs8);
+    assert.deepEqual(Buffer.from(key.pkcs8), read(name + '-pkcs8.der'));
+  }
+});
+
+test('RSA GM0016 兼容结构由 BouncyCastle 独立解封并验证私钥可签名', () => {
+  for (const bits of [2048, 3072, 4096]) {
+    for (const encoding of ['key', 'pkcs1.key']) {
+      const keyName = encoding === 'key' ? `rsa-enc-${bits}.key` : `rsa-enc-${bits}-pkcs1.key`;
+      const result = convert({ signCert: text('rsa-sign.pem'), encCert: text(`rsa-enc-${bits}.pem`),
+        privateKey: text(keyName), format: '0016' });
+      assert.equal(result.algorithm, 'RSA');
+      const bytes = Buffer.from(result.base64, 'base64');
+      assert.equal(bytes.readUInt32LE(0), 0x2002);
+      assert.equal(bytes.readUInt32LE(4), 256);
+      assert.equal((bytes.length - 264) % 8, 0);
+      writeFileSync(new URL(`rsa-output-${bits}-${encoding}`, fixtureDir), result.base64);
+    }
+  }
+  const result = convert({ signCert: text('rsa-enc-4096.pem'), encCert: text('rsa-enc-2048.pem'),
+    privateKey: text('rsa-enc-2048.key'), format: '0016' });
+  assert.equal(Buffer.from(result.base64, 'base64').readUInt32LE(4), 512);
+  writeFileSync(new URL('rsa-output-large-sign', fixtureDir), result.base64);
+  const output = execFileSync('java', ['--class-path', text('classpath.txt').trim(),
+    new URL('GmInterop.java', import.meta.url).pathname, 'verify-rsa', fixtureDir.pathname], { encoding: 'utf8' });
+  assert.match(output, /RSA GM0016 交叉解密验证通过/);
+});
+
+test('RSA 拒绝 GM0009、算法混用、证书错配和损坏的 CRT 参数', async () => {
+  const rsaInputs = { signCert: text('rsa-sign.pem'), encCert: text('rsa-enc-2048.pem'),
+    privateKey: text('rsa-enc-2048.key'), format: '0016' };
+  assert.throws(() => convert({ ...rsaInputs, format: '0009' }), /GM0009.*SM2/);
+  assert.throws(() => convert({ ...rsaInputs, signCert: text('sign.pem') }), /算法必须一致/);
+  assert.throws(() => convert({ ...rsaInputs, privateKey: text('enc.key') }), /算法必须一致/);
+  assert.throws(() => convert({ ...rsaInputs, privateKey: text('rsa-sign.key') }), /不匹配/);
+  const { createPrivateKey } = await import('node:crypto');
+  const jwk = createPrivateKey(rsaInputs.privateKey).export({ format: 'jwk' });
+  for (const field of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
+    const broken = Buffer.from(jwk[field], 'base64url');
+    broken[broken.length - 1] ^= 2;
+    const pem = createPrivateKey({ key: { ...jwk, [field]: broken.toString('base64url') }, format: 'jwk' })
+      .export({ type: 'pkcs1', format: 'pem' }).toString();
+    assert.throws(() => convert({ ...rsaInputs, privateKey: pem }), /RSA.*不一致/);
+  }
+  assert.notEqual(convert(rsaInputs).base64, convert(rsaInputs).base64);
+  const encrypted = createPrivateKey(rsaInputs.privateKey).export({ type: 'pkcs8', format: 'pem',
+    cipher: 'aes-256-cbc', passphrase: 'synthetic-test-only' }).toString();
+  assert.throws(() => convert({ ...rsaInputs, privateKey: encrypted }), /加密 PEM/);
+});
