@@ -6,6 +6,6 @@
   "scripts": {
     "build": "npm --prefix tools/gm-key-converter run build && node build.mjs",
     "test": "npm --prefix tools/gm-key-converter test",
-    "check": "node --check src/app.js && node --check build.mjs"
+    "check": "node --check src/app.js && node --check build.mjs && node --check tools/gm-key-converter/src/core.js && node --check tools/gm-key-converter/src/rsa.js && node --check tools/gm-key-converter/src/ui.js"
   }
 }
