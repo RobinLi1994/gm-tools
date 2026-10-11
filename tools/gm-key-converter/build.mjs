@@ -18,13 +18,13 @@ const result = await build({
 });
 const bundle = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const scriptHash = createHash('sha256').update(bundle).digest('base64');
-const packages = ['sm-crypto-v2', '@noble/curves', '@noble/hashes', '@noble/ciphers'];
+const packages = ['sm-crypto-v2', '@noble/curves', '@noble/hashes', '@noble/ciphers', 'crypto-js'];
 let licenses = '';
 for (const name of packages) {
   const path = new URL(`node_modules/${name}/`, root);
   const pkg = JSON.parse(await readFile(new URL('package.json', path), 'utf8'));
   const license = await readFile(new URL(name === 'sm-crypto-v2' ? 'LICENCE_MIT' : 'LICENSE', path), 'utf8');
-  licenses += `${name} ${pkg.version}\n${license}\n\n`;
+  licenses += `${name} ${pkg.version}\n${license.replace(/[ \t]+$/gm, '')}\n\n`;
 }
 const escapeHtml = (text) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const template = await readFile(new URL('src/page.html', root), 'utf8');
